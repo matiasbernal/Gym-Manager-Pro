@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>Gym Manager Pro - Matías Edition</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
+    <style>
+        body { font-family: -apple-system, sans-serif; background-color: #f1f5f9; }
+        .dark body { background-color: #0f172a; }
+        .active-view { border-left: 4px solid #2563eb; background-color: #eff6ff; color: #1e40af; }
+        .dark .active-view { background-color: #1e293b; color: #60a5fa; border-left: 4px solid #3b82f6; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body class="transition-colors duration-200">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        const initialData = {
+            clientes: [
+                { id: 1, nombre: "Juan Pérez", objetivo: "Hipertrofia", peso: 85, altura: 180, lesiones: "Molestia leve en hombro derecho", cargas: [], rutinas: [] },
+                { id: 2, nombre: "Ana García", objetivo: "Pérdida de Grasa", peso: 64, altura: 165, lesiones: "Ninguna", cargas: [], rutinas: [] }
+            ],
+            clases: [
+                { id: 101, nombre: "Crossfit Mañana", rutinas: [] },
+            ],
+            recordatorios: []
+        };
+
+        const formatFecha = (str) => {
+            if(!str) return '';
+            const [y, m, d] = str.split('-');
+            return `${d}-${m}-${y}`;
+        };
+
+        const truncar = (txt, limite = 30) => {
+            if (!txt) return "";
+            return txt.length > limite ? txt.substring(0, limite) + "..." : txt;
+        };
+
+        const RenderSpecs = ({ e, gen }) => {
+            const displayS = e.s || (gen ? gen.split('x')[0] : '');
+            const displayR = e.r || (gen ? gen.split('x')[1] : '');
+            if (e.t) return <span className="font-bold text-slate-700 dark:text-slate-300">{e.t}</span>;
+            if (displayS && displayR) return <span className="font-bold text-slate-700 dark:text-slate-300">{displayS}x{displayR}</span>;
+            if (gen) return <span className="font-bold text-slate-700 dark:text-slate-300">{gen}</span>;
+            return null;
+        };
+
+        const App = () => {
+            const [data, setData] = useState(() => {
+                const saved = localStorage.getItem('gymData_matias');
+                return saved ? JSON.parse(saved) : initialData;
+            });
+            const [vista, setVista] = useState('inicio');
+            const [seleccionado, setSeleccionado] = useState(null);
+            const [modal, setModal] = useState({ abierto: false, tipo: '', editando: null });
+            
+            // Estado para Modo Oscuro
+            const [isDark, setIsDark] = useState(() => {
+                return localStorage.getItem('theme_matias') === 'dark';
+            });
+
+            useEffect(() => { localStorage.setItem('gymData_matias', JSON.stringify(data)); }, [data]);
+            
+            useEffect(() => {
+                if (isDark) {
+                    document.documentElement.classList.add('dark');
+                    localStorage.setItem('theme_matias', 'dark');
+                } else {
+                    document.documentElement.classList.remove('dark');
+                    localStorage.setItem('theme_matias', 'light');
+                }
+            }, [isDark]);
+
+            const guardarEntidad = (tipo, entidad) => {
+                const newData = { ...data };
+                if (entidad.id) newData[tipo] = newData[tipo].map(item => item.id === entidad.id ? entidad : item);
+                else { entidad.id = Date.now(); newData[tipo].push(entidad); }
+                setData(newData);
+                if (seleccionado && seleccionado.id === entidad.id) setSeleccionado(entidad);
+            };
+
+            const eliminarRutinaCliente = (clienteId, rutinaId) => {
+                const cliente = data.clientes.find(c => c.id === clienteId);
+                if (!cliente) return;
+                const nuevasRutinas = cliente.rutinas.filter(r => r.id !== rutinaId);
+                const clienteActualizado = { ...cliente, rutinas: nuevasRutinas };
+                guardarEntidad('clientes', clienteActualizado);
+                if (seleccionado && seleccionado.id === clienteId) setSeleccionado(clienteActualizado);
+            };
+
+            const eliminarRutinaClase = (claseId, rutinaId) => {
+                const clase = data.clases.find(c => c.id === claseId);
+                if (!clase) return;
+                const nuevasRutinas = clase.rutinas.filter(r => r.id !== rutinaId);
+                const claseActualizada = { ...clase, rutinas: nuevasRutinas };
+                guardarEntidad('clases', claseActualizada);
+                if (seleccionado && seleccionado.id === claseId) setSeleccionado(claseActualizada);
+            };
+
+            const eliminarRecordatorio = (id) => {
+                const nuevos = data.recordatorios.filter(r => r.id !== id);
+                setData({ ...data, recordatorios: nuevos });
+            };
+
+            const compartirWhatsApp = (rutina, esClase = false) => {
+                let texto = `RUTINA: ${rutina.nombre.toUpperCase()}\n`;
+                if(esClase) texto += `Fecha Clase: ${formatFecha(rutina.fechaClase)}\n`;
+                if(esClase && rutina.numVueltas) texto += `🔄 ${rutina.numVueltas} VUELTAS\n`;
+                if(esClase && rutina.tiempoGeneral) texto += `⏱️ TIEMPO GENERAL: ${rutina.tiempoGeneral} seg\n`;
+                
+                const exportarBloque = (titulo, ejercicios, general) => {
+                    if(!ejercicios || ejercicios.length === 0) return "";
+                    let b = `\n${titulo} [${general || ''}]\n`;
+                    ejercicios.forEach(e => {
+                        const s = e.s || (general ? general.split('x')[0] : '');
+                        const r = e.r || (general ? general.split('x')[1] : '');
+                        let spec = e.t ? e.t : (s && r ? `${s}x${r}` : general || '');
+                        b += `- ${e.ej} ${spec}\n`;
+                        if(e.inst) b += `  (Nota: ${e.inst})\n`;
+                    });
+                    return b;
+                };
+                if(rutina.dias) {
+                    rutina.dias.forEach(dia => {
+                        texto += `\n--- ${dia.nombre.toUpperCase()} ---`;
+                        texto += exportarBloque('ENTRADA EN CALOR', dia.entrada, dia.genEntrada);
+                        texto += exportarBloque('RUTINA PRINCIPAL', dia.principal, dia.genPrincipal);
+                    });
+                } else {
+                    texto += exportarBloque('ENTRADA EN CALOR', rutina.entrada, rutina.generalEntrada);
+                    texto += exportarBloque('RUTINA PRINCIPAL', rutina.principal, rutina.generalPrincipal);
+                }
+                window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
+            };
+
+            return (
+                <div className={`flex h-screen overflow-hidden ${isDark ? 'dark bg-slate-900' : 'bg-slate-50'}`}>
+                    <aside className="w-64 bg-white dark:bg-slate-800 border-r dark:border-slate-700 flex flex-col shadow-lg transition-colors">
+                        <div className="p-6 border-b dark:border-slate-700 font-black text-blue-600 dark:text-blue-400 tracking-tighter cursor-pointer" onClick={() => setVista('inicio')}>GYM ADMIN PRO</div>
+                        <nav className="flex-1 overflow-y-auto p-4 space-y-1 text-sm text-slate-700 dark:text-slate-300">
+                            <button onClick={() => setVista('inicio')} className={`w-full text-left p-2 rounded-lg font-semibold ${vista === 'inicio' ? 'active-view' : 'hover:bg-slate-100 dark:hover:bg-slate-700'}`}>Dashboard Inicio</button>
+                            <div className="pt-4 pb-2 text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Clientes</div>
+                            {data.clientes.map(c => (
+                                <button key={c.id} onClick={() => { setSeleccionado(c); setVista('cliente'); }} className={`w-full text-left p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 ${seleccionado?.id === c.id && vista === 'cliente' ? 'active-view' : ''}`}>{c.nombre}</button>
+                            ))}
+                            <button onClick={() => setModal({abierto: true, tipo: 'cliente', editando: null})} className="w-full text-blue-600 dark:text-blue-400 text-xs font-bold p-2 text-left">+ Nuevo Cliente</button>
+                            <div className="pt-4 pb-2 text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Clases</div>
+                            {data.clases.map(c => (
+                                <button key={c.id} onClick={() => { setSeleccionado(c); setVista('clase'); }} className={`w-full text-left p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 ${seleccionado?.id === c.id && vista === 'clase' ? 'active-view' : ''}`}>{c.nombre}</button>
+                            ))}
+                            <button onClick={() => setModal({abierto: true, tipo: 'clase'})} className="w-full text-indigo-600 dark:text-indigo-400 text-xs font-bold p-2 text-left">+ Nueva Clase</button>
+                            <button onClick={() => setVista('calendario')} className={`w-full text-left p-2 rounded-lg font-semibold mt-4 hover:bg-slate-100 dark:hover:bg-slate-700 ${vista === 'calendario' ? 'active-view' : ''}`}>Calendario Completo</button>
+                        </nav>
+                        <div className="p-4 border-t dark:border-slate-700">
+                            <button onClick={() => setIsDark(!isDark)} className="w-full flex justify-center items-center gap-2 p-2 rounded-lg font-bold text-sm bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200">
+                                {isDark ? '☀️ Modo Claro' : '🌙 Modo Oscuro'}
+                            </button>
+                        </div>
+                    </aside>
+
+                    <main className="flex-1 overflow-y-auto bg-slate-50 dark:bg-slate-900 transition-colors">
+                        {vista === 'inicio' && <VistaInicio data={data} setVista={setVista} setSeleccionado={setSeleccionado} setModal={setModal} />}
+                        {vista === 'cliente' && seleccionado && (
+                            <VistaCliente 
+                                cliente={seleccionado} 
+                                onEditarFicha={() => setModal({abierto: true, tipo: 'cliente', editando: seleccionado})}
+                                onNuevaRutina={() => setModal({abierto: true, tipo: 'rutinaCliente'})}
+                                onEditarRutina={(r) => setModal({abierto: true, tipo: 'rutinaCliente', editando: r})}
+                                onEliminarRutina={(rutinaId) => eliminarRutinaCliente(seleccionado.id, rutinaId)}
+                                onCompartir={(r) => compartirWhatsApp(r)}
+                                onUpdateCargas={(cargas) => guardarEntidad('clientes', {...seleccionado, cargas})}
+                            />
+                        )}
+                        {vista === 'clase' && seleccionado && (
+                            <VistaClase 
+                                clase={seleccionado} 
+                                onNuevaRutina={() => setModal({abierto: true, tipo: 'rutinaClase'})}
+                                onEditar={(r) => setModal({abierto: true, tipo: 'rutinaClase', editando: r})}
+                                onEliminarRutina={(rutinaId) => eliminarRutinaClase(seleccionado.id, rutinaId)}
+                                onCompartir={(r) => compartirWhatsApp(r, true)}
+                                onEliminarClase={(id) => {
+                                    const nuevasClases = data.clases.filter(c => c.id !== id);
+                                    setData({...data, clases: nuevasClases});
+                                    setSeleccionado(null);
+                                    setVista('inicio');
+                                }}
+                            />
+                        )}
+                        {vista === 'calendario' && <VistaCalendario recordatorios={data.recordatorios} clientes={data.clientes} onNuevo={() => setModal({abierto: true, tipo: 'recordatorio', editando: null})} onEditar={(rec) => setModal({abierto: true, tipo: 'recordatorio', editando: rec})} onEliminar={eliminarRecordatorio} />}
+                    </main>
+
+                    {modal.abierto && (
+                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                            <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl max-w-6xl w-full max-h-[90vh] overflow-y-auto p-8 text-slate-800 dark:text-slate-100">
+                                {modal.tipo === 'cliente' && <FormCliente editando={modal.editando} onCerrar={() => setModal({abierto: false})} onGuardar={(c) => guardarEntidad('clientes', c)} />}
+                                {modal.tipo === 'clase' && <FormClase onCerrar={() => setModal({abierto: false})} onGuardar={(c) => guardarEntidad('clases', c)} />}
+                                {modal.tipo === 'rutinaClase' && <FormRutinaClase editando={modal.editando} onCerrar={() => setModal({abierto: false})} onGuardar={(r) => {
+                                    const actual = {...seleccionado};
+                                    if(r.id) actual.rutinas = actual.rutinas.map(item => item.id === r.id ? r : item);
+                                    else { r.id = Date.now(); r.fechaCreacion = new Date().toISOString().split('T')[0]; actual.rutinas.push(r); }
+                                    guardarEntidad('clases', actual);
+                                }} />}
+                                {modal.tipo === 'rutinaCliente' && <FormRutinaCliente editando={modal.editando} onCerrar={() => setModal({abierto: false})} onGuardar={(r) => {
+                                    const actual = {...seleccionado};
+                                    if(!actual.rutinas) actual.rutinas = [];
+                                    if(r.id) actual.rutinas = actual.rutinas.map(item => item.id === r.id ? r : item);
+                                    else { r.id = Date.now(); actual.rutinas.push(r); }
+                                    guardarEntidad('clientes', actual);
+                                }} />}
+                                {modal.tipo === 'recordatorio' && <FormRecordatorio clientes={data.clientes} editando={modal.editando} onCerrar={() => setModal({abierto: false})} onGuardar={(rec) => guardarEntidad('recordatorios', rec)} />}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const VistaInicio = ({ data, setVista, setSeleccionado, setModal }) => {
+            const proximos = useMemo(() => {
+                return [...data.recordatorios]
+                    .sort((a, b) => new Date(a.fecha) - new Date(b.fecha))
+                    .slice(0, 5);
+            }, [data.recordatorios]);
+            return (
+                <div className="p-8 max-w-6xl mx-auto">
+                    <h2 className="text-4xl font-black mb-8 text-slate-800 dark:text-white">Hola, Matías</h2>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+                        <div className="bg-blue-600 text-white p-6 rounded-3xl shadow-lg">
+                            <p className="text-blue-100 font-bold text-xs uppercase tracking-widest">Clientes Activos</p>
+                            <p className="text-5xl font-black mt-2">{data.clientes.length}</p>
+                        </div>
+                        <div className="bg-indigo-600 text-white p-6 rounded-3xl shadow-lg">
+                            <p className="text-indigo-100 font-bold text-xs uppercase tracking-widest">Clases Grupales</p>
+                            <p className="text-5xl font-black mt-2">{data.clases.length}</p>
+                        </div>
+                        <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-700">
+                            <p className="text-slate-400 font-bold text-xs uppercase tracking-widest">Tareas Pendientes</p>
+                            <p className="text-5xl font-black mt-2 text-slate-800 dark:text-white">{data.recordatorios.length}</p>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div className="bg-white dark:bg-slate-800 p-8 rounded-[2.5rem] shadow-sm border border-slate-100 dark:border-slate-700">
+                            <div className="flex justify-between items-center mb-6">
+                                <h3 className="text-xl font-black dark:text-white">Próximos en Calendario</h3>
+                                <button onClick={() => setVista('calendario')} className="text-blue-600 dark:text-blue-400 text-xs font-bold">Ver todo</button>
+                            </div>
+                            <div className="space-y-4">
+                                {proximos.length > 0 ? proximos.map(rec => (
+                                    <div key={rec.id} className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-slate-700 rounded-2xl">
+                                        <div className="bg-white dark:bg-slate-800 p-2 rounded-xl text-center min-w-[60px] border dark:border-slate-600 shadow-sm">
+                                            <p className="text-[10px] font-black text-blue-600 dark:text-blue-400">{formatFecha(rec.fecha).split('-')[1]}</p>
+                                            <p className="text-lg font-black dark:text-white">{formatFecha(rec.fecha).split('-')[0]}</p>
+                                        </div>
+                                        <div>
+                                            <p className="font-black text-slate-800 dark:text-white">{data.clientes.find(c => c.id == rec.clienteId)?.nombre || 'General'}</p>
+                                            <p className="text-xs text-slate-500 dark:text-slate-400 font-medium uppercase tracking-tighter">{rec.tipo}</p>
+                                        </div>
+                                    </div>
+                                )) : <p className="text-slate-400 text-sm italic">No hay tareas agendadas...</p>}
+                            </div>
+                        </div>
+                        <div className="bg-white dark:bg-slate-800 p-8 rounded-[2.5rem] shadow-sm border border-slate-100 dark:border-slate-700">
+                            <h3 className="text-xl font-black mb-6 dark:text-white">Accesos Rápidos</h3>
+                            <div className="grid grid-cols-2 gap-4">
+                                <button onClick={() => setModal({abierto: true, tipo: 'recordatorio', editando: null})} className="p-4 bg-slate-800 dark:bg-slate-600 text-white rounded-2xl font-bold text-sm hover:bg-slate-700 transition-colors">Agendar Tarea</button>
+                                <button onClick={() => setModal({abierto: true, tipo: 'cliente', editando: null})} className="p-4 bg-blue-50 dark:bg-slate-700 text-blue-600 dark:text-blue-400 rounded-2xl font-bold text-sm border border-blue-100 dark:border-slate-600">Nuevo Cliente</button>
+                                <button onClick={() => setModal({abierto: true, tipo: 'clase'})} className="p-4 bg-indigo-50 dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 rounded-2xl font-bold text-sm border border-indigo-100 dark:border-slate-600">Nueva Clase</button>
+                                <button onClick={() => setVista('calendario')} className="p-4 bg-orange-50 dark:bg-slate-700 text-orange-600 dark:text-orange-400 rounded-2xl font-bold text-sm border border-orange-100 dark:border-slate-600">Calendario</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const VistaCliente = ({ cliente, onEditarFicha, onNuevaRutina, onEditarRutina, onEliminarRutina, onCompartir, onUpdateCargas }) => {
+            const [nuevoPeso, setNuevoPeso] = useState({ ej: '', peso: '', fecha: new Date().toISOString().split('T')[0] });
+            const cargasAgrupadas = (cliente.cargas || []).reduce((acc, curr) => {
+                const nombreKey = curr.ej.trim().toLowerCase();
+                if (!acc[nombreKey]) acc[nombreKey] = { nombre: curr.ej, registros: [] };
+                acc[nombreKey].registros.push(curr);
+                return acc;
+            }, {});
+
+            return (
+                <div className="p-8 max-w-6xl mx-auto">
+                    <div className="flex justify-between items-end mb-8">
+                        <div>
+                            <h2 className="text-4xl font-black text-slate-800 dark:text-white">{cliente.nombre}</h2>
+                            <p className="text-slate-500 font-medium tracking-tight">Ficha Técnica Completa</p>
+                        </div>
+                        <div className="flex gap-3">
+                            <button onClick={onEditarFicha} className="bg-white dark:bg-slate-800 border dark:border-slate-600 text-slate-600 dark:text-slate-300 px-6 py-2 rounded-xl font-bold shadow-sm">Editar Ficha</button>
+                            <button onClick={onNuevaRutina} className="bg-blue-600 text-white px-6 py-2 rounded-xl font-bold shadow-lg">+ Crear Rutina</button>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
+                        <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border dark:border-slate-700">
+                            <h3 className="font-bold text-slate-700 dark:text-slate-200 mb-4">Evolución de Cargas</h3>
+                            <div className="space-y-4 mb-6 max-h-48 overflow-y-auto pr-2">
+                                {Object.values(cargasAgrupadas).map((grupo, idx) => (
+                                    <div key={idx} className="bg-slate-50 dark:bg-slate-700 p-3 rounded-xl">
+                                        <p className="text-xs font-black text-blue-600 dark:text-blue-400 uppercase mb-2">{grupo.nombre}</p>
+                                        <div className="flex gap-3 overflow-x-auto pb-1 hide-scrollbar">
+                                            {grupo.registros.map((r, i) => (
+                                                <div key={i} className="bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-3 py-1 text-center min-w-[70px]">
+                                                    <div className="text-sm font-black dark:text-white">{r.peso}kg</div>
+                                                    <div className="text-[8px] text-slate-400">{formatFecha(r.fecha)}</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                <input className="flex-1 min-w-[120px] p-2 border dark:border-slate-600 rounded-lg text-sm dark:bg-slate-700 dark:text-white" placeholder="Ejercicio" value={nuevoPeso.ej} onChange={e=>setNuevoPeso({...nuevoPeso, ej: e.target.value})} />
+                                <input className="w-16 p-2 border dark:border-slate-600 rounded-lg text-sm dark:bg-slate-700 dark:text-white" placeholder="Kg" type="number" value={nuevoPeso.peso} onChange={e=>setNuevoPeso({...nuevoPeso, peso: e.target.value})} />
+                                <input className="w-32 p-2 border dark:border-slate-600 rounded-lg text-[10px] dark:bg-slate-700 dark:text-white" type="date" value={nuevoPeso.fecha} onChange={e=>setNuevoPeso({...nuevoPeso, fecha: e.target.value})} />
+                                <button onClick={() => { if(nuevoPeso.ej && nuevoPeso.peso) { onUpdateCargas([...(cliente.cargas||[]), nuevoPeso]); setNuevoPeso({...nuevoPeso, ej:'', peso:'', fecha: new Date().toISOString().split('T')[0]}); }}} className="bg-slate-800 dark:bg-blue-600 text-white px-3 rounded-lg text-xs font-bold">OK</button>
+                            </div>
+                        </div>
+                        <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border dark:border-slate-700 text-sm">
+                            <h3 className="font-bold text-slate-700 dark:text-slate-200 mb-4">Datos del Cliente</h3>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="p-3 bg-slate-50 dark:bg-slate-700 rounded-lg dark:text-slate-200"><strong>Objetivo:</strong><br/>{cliente.objetivo}</div>
+                                <div className="p-3 bg-slate-50 dark:bg-slate-700 rounded-lg dark:text-slate-200"><strong>Físico:</strong><br/>{cliente.peso}kg / {cliente.altura}cm</div>
+                                <div className="p-3 bg-slate-50 dark:bg-slate-700 rounded-lg col-span-2 dark:text-slate-200"><strong>Lesiones / Obs:</strong><br/>{cliente.lesiones || 'Ninguna'}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <h3 className="font-bold text-slate-700 dark:text-slate-200 mb-4 text-xl">Historial de Rutinas</h3>
+                    <div className="space-y-6">
+                        {cliente.rutinas?.map(r => (
+                            <div key={r.id} className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700">
+                                <div className="flex justify-between items-start mb-4">
+                                    <h4 className="text-2xl font-black text-slate-800 dark:text-white">{r.nombre}</h4>
+                                    <div className="flex gap-2">
+                                        <button onClick={() => onCompartir(r)} className="text-green-600 bg-green-50 dark:bg-green-900/30 dark:text-green-400 px-4 py-1 rounded-lg text-xs font-bold">WhatsApp</button>
+                                        <button onClick={() => onEditarRutina(r)} className="text-blue-600 bg-blue-50 dark:bg-blue-900/30 dark:text-blue-400 px-4 py-1 rounded-lg text-xs font-bold">Editar</button>
+                                        <button onClick={() => onEliminarRutina(r.id)} className="text-red-600 bg-red-50 dark:bg-red-900/30 dark:text-red-400 px-4 py-1 rounded-lg text-xs font-bold">Eliminar</button>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                    {r.dias.map((dia, dIdx) => (
+                                        <div key={dIdx} className="bg-slate-50 dark:bg-slate-700 p-4 rounded-2xl text-xs">
+                                            <p className="font-black text-blue-600 dark:text-blue-400 mb-3 border-b dark:border-slate-600 pb-1 uppercase">{dia.nombre}</p>
+                                            
+                                            {dia.entrada && dia.entrada.length > 0 && (
+                                                <div className="mb-3">
+                                                    <p className="text-[10px] font-black text-orange-500 uppercase mb-1">Entrada en Calor</p>
+                                                    {dia.entrada.map((e, ei) => (
+                                                        <div key={ei} className="py-1 flex justify-between border-b border-slate-200 dark:border-slate-600 last:border-0">
+                                                            <span className="font-medium truncate pr-2 dark:text-slate-200">{e.ej}</span>
+                                                            <RenderSpecs e={e} gen={dia.genEntrada} />
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+
+                                            {dia.principal && dia.principal.length > 0 && (
+                                                <div>
+                                                    <p className="text-[10px] font-black text-blue-500 uppercase mb-1">Principal</p>
+                                                    {dia.principal.map((e, ei) => (
+                                                        <div key={ei} className="py-1 border-b border-slate-200 dark:border-slate-600 last:border-0 overflow-hidden">
+                                                            <div className="flex justify-between">
+                                                                <span className="font-medium truncate pr-2 dark:text-slate-200">{e.ej}</span>
+                                                                <RenderSpecs e={e} gen={dia.genPrincipal} />
+                                                            </div>
+                                                            {e.inst && (
+                                                                <p className="text-[10px] text-slate-500 dark:text-slate-400 italic mt-0.5 truncate" title={e.inst}>
+                                                                    {truncar(e.inst, 30)}
+                                                                </p>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        const VistaClase = ({ clase, onNuevaRutina, onCompartir, onEditar, onEliminarRutina, onEliminarClase }) => (
+            <div className="p-8 max-w-5xl mx-auto">
+                <div className="flex justify-between items-end mb-10">
+                    <div>
+                        <h2 className="text-4xl font-black dark:text-white">{clase.nombre}</h2>
+                        <p className="text-slate-400 font-bold uppercase text-xs tracking-widest">Planificación Grupal</p>
+                    </div>
+                    <div className="flex gap-3">
+                        <button onClick={() => {
+                            if(window.confirm("¿Estás seguro de eliminar esta categoría de clase entera?")) {
+                                onEliminarClase(clase.id);
+                            }
+                        }} className="bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-6 py-3 rounded-2xl font-bold shadow-sm">Eliminar Clase</button>
+                        <button onClick={onNuevaRutina} className="bg-indigo-600 text-white px-8 py-3 rounded-2xl font-bold shadow-lg">+ Nueva Clase</button>
+                    </div>
+                </div>
+                <div className="space-y-12">
+                    {clase.rutinas?.sort((a,b)=>new Date(b.fechaClase)-new Date(a.fechaClase)).map(r => (
+                        <div key={r.id} className="bg-white dark:bg-slate-800 rounded-[2rem] border dark:border-slate-700 p-8 shadow-sm">
+                            <div className="flex justify-between items-start mb-6">
+                                <div>
+                                    <h3 className="text-3xl font-black dark:text-white">{r.nombre}</h3>
+                                    <p className="text-blue-600 dark:text-blue-400 font-bold">Fecha de la clase: {formatFecha(r.fechaClase)}</p>
+                                    {r.numVueltas && <p className="text-orange-600 dark:text-orange-400 font-bold text-sm mt-1">🔄 {r.numVueltas} vueltas</p>}
+                                    {r.tiempoGeneral && <p className="text-green-600 dark:text-green-400 font-bold text-sm">⏱️ {r.tiempoGeneral} seg</p>}
+                                </div>
+                                <div className="text-right flex flex-col items-end gap-1">
+                                    <button onClick={() => onCompartir(r)} className="bg-green-500 text-white px-6 py-2 rounded-xl text-sm font-bold shadow-md">WhatsApp</button>
+                                    {r.fechaCreacion && <p className="text-[10px] text-slate-400 dark:text-slate-500">Creado: {formatFecha(r.fechaCreacion)}</p>}
+                                    <div className="flex gap-2 mt-1">
+                                        <button onClick={() => onEditar(r)} className="text-xs text-blue-500 dark:text-blue-400 font-bold">Editar</button>
+                                        <button onClick={() => onEliminarRutina(r.id)} className="text-xs text-red-500 dark:text-red-400 font-bold">Eliminar</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="grid md:grid-cols-2 gap-8">
+                                <div className="bg-orange-50/50 dark:bg-slate-700 p-6 rounded-3xl border border-orange-100 dark:border-slate-600">
+                                    <p className="text-orange-700 dark:text-orange-400 font-black text-sm mb-4 uppercase">Entrada en Calor</p>
+                                    {r.entrada.map((e, i) => (
+                                        <div key={i} className="border-b border-orange-100/50 dark:border-slate-600 py-2 text-sm last:border-0">
+                                            <div className="flex justify-between dark:text-slate-200">
+                                                <span className="font-medium">{e.ej}</span> <RenderSpecs e={e} gen={r.generalEntrada} />
+                                            </div>
+                                            {e.inst && <p className="text-[11px] text-orange-600 dark:text-orange-300 italic mt-0.5 truncate" title={e.inst}>{truncar(e.inst, 30)}</p>}
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="bg-blue-50/50 dark:bg-slate-700 p-6 rounded-3xl border border-blue-100 dark:border-slate-600">
+                                    <p className="text-blue-700 dark:text-blue-400 font-black text-sm mb-4 uppercase">Rutina Principal</p>
+                                    {r.principal.map((e, i) => (
+                                        <div key={i} className="border-b border-blue-100/50 dark:border-slate-600 py-2 text-sm last:border-0">
+                                            <div className="flex justify-between dark:text-slate-200">
+                                                <span className="font-medium">{e.ej}</span> <RenderSpecs e={e} gen={r.generalPrincipal} />
+                                            </div>
+                                            {e.inst && <p className="text-[11px] text-blue-600 dark:text-blue-300 italic mt-0.5 truncate" title={e.inst}>{truncar(e.inst, 30)}</p>}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+
+        const VistaCalendario = ({ recordatorios, clientes, onNuevo, onEditar, onEliminar }) => (
+            <div className="p-8 max-w-5xl mx-auto text-slate-800 dark:text-slate-100">
+                <div className="flex justify-between items-center mb-8">
+                    <h2 className="text-3xl font-black">Calendario</h2>
+                    <button onClick={onNuevo} className="bg-slate-800 dark:bg-blue-600 text-white px-6 py-2 rounded-xl font-bold">+ Agendar</button>
+                </div>
+                <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-sm border dark:border-slate-700 overflow-hidden">
+                    <table className="w-full text-left">
+                        <thead className="bg-slate-50 dark:bg-slate-700 border-b dark:border-slate-600 text-[10px] font-black text-slate-400 dark:text-slate-300 uppercase">
+                            <tr><th className="p-4">Fecha</th><th className="p-4">Cliente</th><th className="p-4">Tarea</th><th className="p-4">Acciones</th></tr>
+                        </thead>
+                        <tbody className="divide-y dark:divide-slate-700 text-sm font-medium">
+                            {recordatorios.map(rec => (
+                                <tr key={rec.id} className="hover:bg-slate-50 dark:hover:bg-slate-700">
+                                    <td className="p-4">{formatFecha(rec.fecha)}</td>
+                                    <td className="p-4 font-black">{clientes.find(c => c.id == rec.clienteId)?.nombre || 'Sin cliente'}</td>
+                                    <td className="p-4">{rec.tipo || rec.detalle || 'Sin tipo'}</td>
+                                    <td className="p-4 flex gap-2">
+                                        <button onClick={() => onEditar(rec)} className="text-blue-600 dark:text-blue-400 text-xs font-bold bg-blue-50 dark:bg-blue-900/30 px-3 py-1 rounded-full">✏️ Editar</button>
+                                        <button onClick={() => { if(confirm('¿Eliminar este recordatorio?')) onEliminar(rec.id); }} className="text-red-600 dark:text-red-400 text-xs font-bold bg-red-50 dark:bg-red-900/30 px-3 py-1 rounded-full">🗑️</button>
+                                    </td>
+                                </tr>
+                            ))}
+                            {recordatorios.length === 0 && <tr><td colSpan="4" className="p-8 text-center text-slate-400 italic">No hay recordatorios. Haz click en "+ Agendar"</td></tr>}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        );
+
+        // --- FORMULARIOS ---
+
+        const FormCliente = ({ editando, onCerrar, onGuardar }) => {
+            const [f, setF] = useState(editando || { nombre: '', objetivo: '', peso: '', altura: '', lesiones: '', rutinas: [], cargas: [] });
+            return (
+                <div className="space-y-6">
+                    <h2 className="text-3xl font-black">{editando ? 'Editar Ficha Cliente' : 'Nueva Ficha Cliente'}</h2>
+                    <input className="w-full p-4 border dark:border-slate-600 rounded-2xl bg-slate-50 dark:bg-slate-700 dark:text-white" placeholder="Nombre completo" value={f.nombre} onChange={e=>setF({...f, nombre: e.target.value})} />
+                    <div className="grid grid-cols-2 gap-4">
+                        <input className="p-4 border dark:border-slate-600 rounded-2xl bg-slate-50 dark:bg-slate-700 dark:text-white" placeholder="Peso (kg)" type="number" value={f.peso} onChange={e=>setF({...f, peso: e.target.value})} />
+                        <input className="p-4 border dark:border-slate-600 rounded-2xl bg-slate-50 dark:bg-slate-700 dark:text-white" placeholder="Altura (cm)" type="number" value={f.altura} onChange={e=>setF({...f, altura: e.target.value})} />
+                    </div>
+                    <input className="w-full p-4 border dark:border-slate-600 rounded-2xl bg-slate-50 dark:bg-slate-700 dark:text-white" placeholder="Objetivo" value={f.objetivo} onChange={e=>setF({...f, objetivo: e.target.value})} />
+                    <textarea className="w-full p-4 border dark:border-slate-600 rounded-2xl bg-slate-50 dark:bg-slate-700 dark:text-white h-32" placeholder="Lesiones, molestias u observaciones..." value={f.lesiones} onChange={e=>setF({...f, lesiones: e.target.value})} />
+                    <div className="flex justify-end gap-3"><button onClick={onCerrar} className="px-6 py-2 font-bold dark:text-slate-300">Cancelar</button><button onClick={()=>{onGuardar(f); onCerrar();}} className="bg-blue-600 text-white px-8 py-3 rounded-2xl font-bold">Guardar Cambios</button></div>
+                </div>
+            );
+        };
+
+        const FormClase = ({ onCerrar, onGuardar }) => {
+            const [nombre, setNombre] = useState('');
+            return (
+                <div className="space-y-6">
+                    <h2 className="text-3xl font-black">Nueva Clase Grupal</h2>
+                    <input className="w-full p-4 border dark:border-slate-600 rounded-2xl bg-slate-50 dark:bg-slate-700 dark:text-white font-bold" placeholder="Nombre de la clase" value={nombre} onChange={e=>setNombre(e.target.value)} />
+                    <div className="flex justify-end gap-3"><button onClick={onCerrar} className="px-6 py-2 font-bold dark:text-slate-300">Cancelar</button><button onClick={()=>{onGuardar({nombre, rutinas: []}); onCerrar();}} className="bg-indigo-600 text-white px-8 py-3 rounded-2xl font-bold">Crear Clase</button></div>
+                </div>
+            );
+        };
+
+        const FormRutinaCliente = ({ editando, onCerrar, onGuardar }) => {
+            const [form, setForm] = useState(editando || { nombre: '', tipoSeccion: 'Ambas', diasCount: 1, dias: [{ nombre: 'Día 1', genEntrada: '', genPrincipal: '', entrada: [], principal: [] }] });
+            const adjustDias = (count) => {
+                let d = [...form.dias];
+                if(count > d.length) for(let i=d.length; i<count; i++) d.push({ nombre: `Día ${i+1}`, genEntrada: '', genPrincipal: '', entrada: [], principal: [] });
+                else d = d.slice(0, count);
+                setForm({...form, diasCount: count, dias: d});
+            };
+            const updateEj = (dIdx, type, eIdx, field, val) => {
+                const n = [...form.dias]; n[dIdx][type][eIdx][field] = val; setForm({...form, dias: n});
+            };
+            return (
+                <div className="space-y-8">
+                    <div className="flex justify-between items-center"><h2 className="text-3xl font-black">Planificar Rutina</h2>
+                        <div className="flex gap-4">
+                            <select className="p-3 border dark:border-slate-600 rounded-2xl font-bold bg-white dark:bg-slate-700 dark:text-white text-sm" value={form.tipoSeccion} onChange={e=>setForm({...form, tipoSeccion: e.target.value})}><option value="Ambas">E. Calor + Rutina</option><option value="Solo Entrada">Solo Entrada</option><option value="Solo Rutina">Solo Rutina</option></select>
+                            <select className="p-3 border dark:border-slate-600 rounded-2xl font-bold bg-white dark:bg-slate-700 dark:text-white text-sm" value={form.diasCount} onChange={e=>adjustDias(parseInt(e.target.value))}>{[1,2,3,4,5].map(n=><option key={n} value={n}>{n} Días</option>)}</select>
+                        </div>
+                    </div>
+                    <input className="w-full p-4 border dark:border-slate-600 rounded-2xl bg-slate-50 dark:bg-slate-700 dark:text-white font-bold" placeholder="Nombre de la Rutina" value={form.nombre} onChange={e=>setForm({...form, nombre: e.target.value})} />
+                    {form.dias.map((dia, dIdx) => (
+                        <div key={dIdx} className="p-6 border-2 dark:border-slate-600 rounded-3xl bg-slate-50 dark:bg-slate-800">
+                            <input className="text-lg font-black mb-4 bg-transparent border-b dark:border-slate-600 dark:text-white focus:outline-none" value={dia.nombre} onChange={e=>{const n=[...form.dias]; n[dIdx].nombre=e.target.value; setForm({...form, dias:n});}} />
+                            
+                            <div className="flex gap-4 mb-4">
+                                <input className="p-2 border dark:border-slate-600 rounded-xl text-xs dark:bg-slate-700 dark:text-white w-full" placeholder="S x R General E. Calor" value={dia.genEntrada} onChange={e=>{const n=[...form.dias]; n[dIdx].genEntrada=e.target.value; setForm({...form, dias:n});}} />
+                                <input className="p-2 border dark:border-slate-600 rounded-xl text-xs dark:bg-slate-700 dark:text-white w-full" placeholder="S x R General Principal" value={dia.genPrincipal} onChange={e=>{const n=[...form.dias]; n[dIdx].genPrincipal=e.target.value; setForm({...form, dias:n});}} />
+                            </div>
+
+                            <div className="grid md:grid-cols-2 gap-6">
+                                {(form.tipoSeccion === 'Ambas' || form.tipoSeccion === 'Solo Entrada') && (
+                                    <div className="p-4 rounded-2xl bg-white dark:bg-slate-700 border dark:border-slate-600">
+                                        <div className="flex justify-between items-center mb-3 text-[10px] font-black uppercase text-orange-400">Entrada en Calor</div>
+                                        {dia.entrada.map((ej, eIdx) => (
+                                            <div key={eIdx} className="flex gap-1 mb-1 items-center">
+                                                <input className="flex-1 p-1.5 border dark:border-slate-600 rounded text-[10px] dark:bg-slate-800 dark:text-white" placeholder="Ej" value={ej.ej} onChange={e=>updateEj(dIdx, 'entrada', eIdx, 'ej', e.target.value)} />
+                                                <input className="w-14 p-1.5 border dark:border-slate-600 rounded text-[10px] dark:bg-slate-800 dark:text-white" placeholder="S x R" value={ej.s} onChange={e=>updateEj(dIdx, 'entrada', eIdx, 's', e.target.value)} />
+                                                <input className="w-16 p-1.5 border dark:border-slate-600 rounded text-[10px] dark:bg-slate-800 dark:text-white" placeholder="Tiempo" value={ej.t || ''} onChange={e => updateEj(dIdx, 'entrada', eIdx, 't', e.target.value)} onBlur={e => { let v = e.target.value.replace(/[^0-9]/g, ''); if(v) updateEj(dIdx, 'entrada', eIdx, 't', v + ' seg'); }} />
+                                                <input className="w-20 p-1.5 border dark:border-slate-600 rounded text-[10px] dark:bg-slate-800 dark:text-white" placeholder="Instrucciones" value={ej.inst} onChange={e=>updateEj(dIdx, 'entrada', eIdx, 'inst', e.target.value)} />
+                                                <button onClick={()=>{const n=[...form.dias]; n[dIdx].entrada=n[dIdx].entrada.filter((_, idx)=>idx!==eIdx); setForm({...form, dias:n});}} className="text-red-400 font-bold px-1">×</button>
+                                            </div>
+                                        ))}
+                                        <button onClick={()=>{const n=[...form.dias]; n[dIdx].entrada.push({ej:'', s:'', r:'', t:'', inst:''}); setForm({...form, dias:n});}} className="text-[10px] font-black opacity-40 dark:opacity-70 mt-2 dark:text-white">+ AGREGAR</button>
+                                    </div>
+                                )}
+                                {(form.tipoSeccion === 'Ambas' || form.tipoSeccion === 'Solo Rutina') && (
+                                    <div className="p-4 rounded-2xl bg-white dark:bg-slate-700 border dark:border-slate-600">
+                                        <div className="flex justify-between items-center mb-3 text-[10px] font-black uppercase text-blue-400">Principal</div>
+                                        {dia.principal.map((ej, eIdx) => (
+                                            <div key={eIdx} className="flex gap-1 mb-1 items-center">
+                                                <input className="flex-1 p-1.5 border dark:border-slate-600 rounded text-[10px] dark:bg-slate-800 dark:text-white" placeholder="Ej" value={ej.ej} onChange={e=>updateEj(dIdx, 'principal', eIdx, 'ej', e.target.value)} />
+                                                <input className="w-14 p-1.5 border dark:border-slate-600 rounded text-[10px] dark:bg-slate-800 dark:text-white" placeholder="S x R" value={ej.s} onChange={e=>updateEj(dIdx, 'principal', eIdx, 's', e.target.value)} />
+                                                <input className="w-16 p-1.5 border dark:border-slate-600 rounded text-[10px] dark:bg-slate-800 dark:text-white" placeholder="Tiempo" value={ej.t || ''} onChange={e => updateEj(dIdx, 'principal', eIdx, 't', e.target.value)} onBlur={e => { let v = e.target.value.replace(/[^0-9]/g, ''); if(v) updateEj(dIdx, 'principal', eIdx, 't', v + ' seg'); }} />
+                                                <input className="w-20 p-1.5 border dark:border-slate-600 rounded text-[10px] dark:bg-slate-800 dark:text-white" placeholder="Instrucciones" value={ej.inst} onChange={e=>updateEj(dIdx, 'principal', eIdx, 'inst', e.target.value)} />
+                                                <button onClick={()=>{const n=[...form.dias]; n[dIdx].principal=n[dIdx].principal.filter((_, idx)=>idx!==eIdx); setForm({...form, dias:n});}} className="text-red-400 font-bold px-1">×</button>
+                                            </div>
+                                        ))}
+                                        <button onClick={()=>{const n=[...form.dias]; n[dIdx].principal.push({ej:'', s:'', r:'', t:'', inst:''}); setForm({...form, dias:n});}} className="text-[10px] font-black opacity-40 dark:opacity-70 mt-2 dark:text-white">+ AGREGAR</button>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    ))}
+                    <div className="flex justify-end gap-3 pt-4 border-t dark:border-slate-700 sticky bottom-0 bg-white dark:bg-slate-800"><button onClick={onCerrar} className="px-6 py-2 dark:text-slate-300">Cancelar</button><button onClick={()=>{onGuardar({...form, fecha: new Date().toISOString().split('T')[0]}); onCerrar();}} className="bg-blue-600 text-white px-10 py-3 rounded-2xl font-black shadow-lg">Guardar Planificación</button></div>
+                </div>
+            );
+        };
+
+        const FormRutinaClase = ({ editando, onCerrar, onGuardar }) => {
+            const [form, setForm] = useState(editando || { 
+                nombre: '', fechaClase: new Date().toISOString().split('T')[0], 
+                generalEntrada: '', generalPrincipal: '', 
+                entrada: [{ej: '', s: '', r: '', t: '', inst: ''}], 
+                principal: [{ej: '', s: '', r: '', t: '', inst: ''}],
+                numVueltas: 1, tiempoGeneral: 0
+            });
+            const updateRow = (type, i, field, val) => { const newRows = [...form[type]]; newRows[i][field] = val; setForm({...form, [type]: newRows}); };
+            return (
+                <div className="space-y-6">
+                    <div className="flex justify-between items-center"><h2 className="text-2xl font-black">Planificar Clase</h2><input type="date" className="p-2 border dark:border-slate-600 rounded-xl dark:bg-slate-700 dark:text-white" value={form.fechaClase} onChange={e=>setForm({...form, fechaClase: e.target.value})} /></div>
+                    <input className="w-full p-4 border dark:border-slate-600 rounded-2xl bg-slate-50 dark:bg-slate-700 dark:text-white font-bold" placeholder="Título" value={form.nombre} onChange={e=>setForm({...form, nombre: e.target.value})} />
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                        <div><label className="text-xs font-bold">N° de Vueltas (circuito)</label><input type="number" min="1" className="p-2 border dark:border-slate-600 rounded-xl w-full dark:bg-slate-700 dark:text-white" value={form.numVueltas} onChange={e=>setForm({...form, numVueltas: parseInt(e.target.value)||1})} /></div>
+                        <div><label className="text-xs font-bold">Tiempo General (segundos)</label><input type="number" min="0" className="p-2 border dark:border-slate-600 rounded-xl w-full dark:bg-slate-700 dark:text-white" placeholder="Ej: 45 seg" value={form.tiempoGeneral} onChange={e=>setForm({...form, tiempoGeneral: parseInt(e.target.value)||0})} /></div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <input className="p-2 border dark:border-slate-600 rounded-xl text-xs dark:bg-slate-700 dark:text-white" placeholder="S x R General E. Calor" value={form.generalEntrada} onChange={e=>setForm({...form, generalEntrada: e.target.value})} />
+                        <input className="p-2 border dark:border-slate-600 rounded-xl text-xs dark:bg-slate-700 dark:text-white" placeholder="S x R General Principal" value={form.generalPrincipal} onChange={e=>setForm({...form, generalPrincipal: e.target.value})} />
+                    </div>
+
+                    <div className="grid md:grid-cols-1 gap-6">
+                        {['entrada', 'principal'].map(type => (
+                            <div key={type} className={`p-6 rounded-3xl border dark:border-slate-600 ${type==='entrada'?'bg-orange-50 dark:bg-slate-700':'bg-blue-50 dark:bg-slate-700'}`}>
+                                <h3 className="font-black uppercase text-xs mb-4 dark:text-white">{type==='entrada'?'Entrada en Calor':'Principal'}</h3>
+                                {form[type].map((r, i) => (
+                                    <div key={i} className="flex gap-1 mb-2 items-center">
+                                        <input className="flex-1 p-2 border dark:border-slate-600 rounded-lg text-[10px] dark:bg-slate-800 dark:text-white" placeholder="Ej" value={r.ej} onChange={e=>updateRow(type, i, 'ej', e.target.value)} />
+                                        <input className="w-14 p-2 border dark:border-slate-600 rounded-lg text-[10px] dark:bg-slate-800 dark:text-white" placeholder="S x R" value={r.s} onChange={e=>updateRow(type, i, 's', e.target.value)} />
+                                        <input className="w-16 p-2 border dark:border-slate-600 rounded-lg text-[10px] dark:bg-slate-800 dark:text-white" placeholder="Tiempo" value={r.t || ''} onChange={e => updateRow(type, i, 't', e.target.value)} onBlur={e => { let v = e.target.value.replace(/[^0-9]/g, ''); if(v) updateRow(type, i, 't', v + ' seg'); }} />
+                                        <input className="w-32 p-2 border dark:border-slate-600 rounded-lg text-[10px] dark:bg-slate-800 dark:text-white" placeholder="Instrucciones" value={r.inst} onChange={e=>updateRow(type, i, 'inst', e.target.value)} />
+                                        <button onClick={()=>setForm({...form, [type]: form[type].filter((_, idx) => idx !== i)})} className="text-red-400 font-bold px-1">×</button>
+                                    </div>
+                                ))}
+                                <button onClick={()=>setForm({...form, [type]: [...form[type], {ej:'',s:'',r:'',t:'', inst:''}]})} className="text-[10px] font-black opacity-60 dark:opacity-80 dark:text-white">+ AGREGAR</button>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="flex justify-end gap-3 pt-4"><button onClick={onCerrar} className="px-6 py-2 dark:text-slate-300">Cancelar</button><button onClick={()=>{onGuardar(form); onCerrar();}} className="bg-slate-800 dark:bg-blue-600 text-white px-8 py-3 rounded-2xl font-black">Guardar Plan</button></div>
+                </div>
+            );
+        };
+
+        const FormRecordatorio = ({ clientes, editando, onCerrar, onGuardar }) => {
+            const [form, setForm] = useState(editando || { clienteId: '', fecha: new Date().toISOString().split('T')[0], tipo: 'cambiar rutina', detalle: '' });
+            const [otroVisible, setOtroVisible] = useState(form.tipo === 'otro');
+            const [otroTexto, setOtroTexto] = useState(form.tipo !== 'cambiar rutina' && form.tipo !== 'cambiar entrada en calor' ? form.tipo : '');
+            
+            useEffect(() => {
+                setOtroVisible(form.tipo === 'otro');
+                if(form.tipo !== 'otro') setOtroTexto('');
+            }, [form.tipo]);
+            
+            const handleGuardar = () => {
+                let tipoFinal = form.tipo;
+                if (tipoFinal === 'otro') tipoFinal = otroTexto.trim() || 'Tarea personalizada';
+                onGuardar({ ...form, tipo: tipoFinal });
+                onCerrar();
+            };
+            
+            return (
+                <div className="space-y-6">
+                    <h2 className="text-2xl font-black">{editando ? 'Editar Tarea' : 'Agendar Tarea'}</h2>
+                    <select className="w-full p-3 border dark:border-slate-600 rounded-xl dark:bg-slate-700 dark:text-white" value={form.clienteId} onChange={e=>setForm({...form, clienteId: e.target.value})}>
+                        <option value="">Seleccionar cliente</option>
+                        {clientes.map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}
+                    </select>
+                    <input type="date" className="w-full p-3 border dark:border-slate-600 rounded-xl dark:bg-slate-700 dark:text-white" value={form.fecha} onChange={e=>setForm({...form, fecha: e.target.value})} />
+                    
+                    <select className="w-full p-3 border dark:border-slate-600 rounded-xl dark:bg-slate-700 dark:text-white" value={form.tipo} onChange={e=>setForm({...form, tipo: e.target.value})}>
+                        <option value="cambiar rutina">Cambiar rutina</option>
+                        <option value="cambiar entrada en calor">Cambiar entrada en calor</option>
+                        <option value="otro">Otro (escribir abajo)</option>
+                    </select>
+                    
+                    {otroVisible && (
+                        <input className="w-full p-3 border dark:border-slate-600 rounded-xl dark:bg-slate-700 dark:text-white" placeholder="Describe la tarea..." value={otroTexto} onChange={e=>setOtroTexto(e.target.value)} />
+                    )}
+                    
+                    <div className="flex justify-end gap-3">
+                        <button onClick={onCerrar} className="px-6 py-2 font-bold dark:text-slate-300">Cancelar</button>
+                        <button onClick={handleGuardar} className="bg-blue-600 text-white px-8 py-2 rounded-xl font-bold">Guardar</button>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
