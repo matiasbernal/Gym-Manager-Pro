@@ -1,0 +1,3 @@
+body { font-family: -apple-system, sans-serif; background-color: #f1f5f9; }
+.active-view { border-left: 4px solid #2563eb; background-color: #eff6ff; color: #1e40af; }
+.hide-scrollbar::-webkit-scrollbar { display: none; }
